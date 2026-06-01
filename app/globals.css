@@ -1,0 +1,131 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * OpenDyslexic — self-hostable, but we load from a CDN here for zero-setup.
+ * Toggled on via the `.font-dyslexic` class on <html> (see AccessibilityProvider).
+ */
+@font-face {
+  font-family: "OpenDyslexic";
+  src: url("https://cdn.jsdelivr.net/npm/open-dyslexic@1.0.3/open-dyslexic-regular.woff2")
+    format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "OpenDyslexic";
+  src: url("https://cdn.jsdelivr.net/npm/open-dyslexic@1.0.3/open-dyslexic-bold.woff2")
+    format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/*
+ * Theme tokens. The DEFAULT (calm, learning) palette lives on :root.
+ * The high-contrast palette overrides them under `.theme-contrast`.
+ * Colors are space-separated RGB channels so Tailwind's `<alpha-value>` works.
+ *
+ * Contrast note: default fg/bg is #1f2430 on #f7f8fb ≈ 13:1, and primary text
+ * pairs exceed the WCAG AA 4.5:1 minimum.
+ */
+:root {
+  --color-bg: 247 248 251; /* near-white */
+  --color-surface: 255 255 255;
+  --color-surface-alt: 241 243 248;
+  --color-fg: 31 36 48; /* near-black */
+  --color-muted: 90 99 117;
+  --color-primary: 67 97 238; /* indigo */
+  --color-primary-fg: 255 255 255;
+  --color-accent: 16 163 127;
+  --color-border: 222 226 234;
+  --color-success: 22 135 90;
+  --color-warning: 176 104 0;
+
+  --font-body: "Inter", system-ui, sans-serif;
+  --font-scale: 16px; /* controlled by the font-size slider (14–22px) */
+}
+
+/* Warmer palette during onboarding (applied on the onboarding route wrapper). */
+.theme-onboarding {
+  --color-bg: 254 250 244;
+  --color-surface: 255 255 255;
+  --color-surface-alt: 253 244 232;
+  --color-primary: 217 119 60; /* warm amber */
+  --color-accent: 200 90 70;
+}
+
+/* High-contrast mode — black/white with a vivid, AAA-level primary. */
+.theme-contrast {
+  --color-bg: 0 0 0;
+  --color-surface: 0 0 0;
+  --color-surface-alt: 20 20 20;
+  --color-fg: 255 255 255;
+  --color-muted: 220 220 220;
+  --color-primary: 255 221 0; /* high-vis yellow */
+  --color-primary-fg: 0 0 0;
+  --color-accent: 0 230 200;
+  --color-border: 255 255 255;
+  --color-success: 0 230 118;
+  --color-warning: 255 196 0;
+}
+
+html {
+  font-size: var(--font-scale);
+}
+
+.font-dyslexic body,
+body.font-dyslexic {
+  font-family: "OpenDyslexic", var(--font-body);
+  letter-spacing: 0.02em;
+  word-spacing: 0.08em;
+}
+
+body {
+  background-color: rgb(var(--color-bg));
+  color: rgb(var(--color-fg));
+  font-family: var(--font-body);
+  line-height: 1.6; /* WCAG: body line-height >= 1.6 */
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Visible focus ring for keyboard users on every interactive element. */
+:where(a, button, input, textarea, select, [tabindex]):focus-visible {
+  outline: 3px solid rgb(var(--color-primary));
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Respect reduced-motion globally; the toggle adds the class too. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+.reduce-motion *,
+.reduce-motion *::before,
+.reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
+
+/* Screen-reader-only utility (visually hidden, still announced). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
