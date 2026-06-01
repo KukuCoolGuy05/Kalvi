@@ -14,29 +14,6 @@ refines its approach based on feedback and confusion signals.
 - **NextAuth** (email + Google) for auth
 - Deploy target: **Vercel + Supabase**
 
-## Getting started
-
-```bash
-# 1. Install
-npm install
-
-# 2. Configure environment
-cp .env.example .env
-#   fill in ANTHROPIC_API_KEY, DATABASE_URL, UPSTASH_REDIS_*, NEXTAUTH_SECRET
-
-# 3. Database
-npm run db:push      # create tables (or `db:migrate` for a migration)
-npm run db:seed      # optional: demo learner + progress
-
-# 4. Run
-npm run dev          # http://localhost:3000
-```
-
-> **Auth note:** email sign-in uses a passwordless dev Credentials provider that
-> upserts a user by email — fine for local/MVP. Swap in NextAuth's `EmailProvider`
-> (magic links) + SMTP before production. Google is enabled automatically when
-> `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` are set.
-
 ## How the agent works
 
 The personalization lives in `lib/agent/`:
