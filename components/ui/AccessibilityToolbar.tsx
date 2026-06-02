@@ -39,13 +39,70 @@ export function AccessibilityToolbar() {
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-label={open ? "Close accessibility settings" : "Open accessibility settings"}
-        className="flex h-12 w-12 items-center justify-center rounded-full bg-primary text-primary-fg shadow-lg hover:opacity-90"
+        className="relative flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-fg shadow-lg transition-transform duration-200 ease-out hover:scale-110 active:scale-95"
       >
-        {/* Universal access glyph */}
-        <span aria-hidden className="text-xl font-bold">
-          ♿
+        {/* Pulsing attention ring. Sits behind the button at rest (same size →
+            invisible) and expands outward while animating. The motion-safe
+            variant + the global .reduce-motion rule both quiet it for users who
+            prefer reduced motion. */}
+        {!open && (
+          <span
+            aria-hidden
+            className="absolute inset-0 rounded-full bg-primary opacity-75 motion-safe:animate-ping"
+          />
+        )}
+        {/* Icon swaps + rotates between the accessibility glyph and a close X. */}
+        <span
+          aria-hidden
+          className={`relative transition-transform duration-300 ease-out ${
+            open ? "rotate-90" : "rotate-0"
+          }`}
+        >
+          {open ? <CloseIcon /> : <AccessibilityIcon />}
         </span>
       </button>
     </div>
+  );
+}
+
+// --- Icons (clean inline SVGs, no emoji) ---
+
+/** Universal-access figure: head, outstretched arms, torso, legs. */
+function AccessibilityIcon() {
+  return (
+    <svg
+      width="26"
+      height="26"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <circle cx="12" cy="4" r="1.6" fill="currentColor" stroke="none" />
+      <path d="M5.5 8.5c2 .8 4.2 1.2 6.5 1.2s4.5-.4 6.5-1.2" />
+      <path d="M12 9.7V14" />
+      <path d="M8.5 21l3.5-7 3.5 7" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M18 6 6 18M6 6l12 12" />
+    </svg>
   );
 }

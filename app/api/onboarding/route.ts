@@ -15,6 +15,9 @@ import type { ChatMessage } from "@/types/session";
 
 export const runtime = "nodejs";
 
+// Keep onboarding tight — a few high-value questions, not a long interview.
+const MAX_ONBOARDING_STEPS = 4;
+
 /**
  * POST /api/onboarding
  *
@@ -40,7 +43,7 @@ export async function POST(req: NextRequest) {
   // Track the step in Redis. Step = number of user turns taken so far + 1.
   const prior = await getOnboardingState(userId);
   const userTurns = messages.filter((m) => m.role === "user").length;
-  const step = Math.min(7, Math.max(prior?.step ?? 1, userTurns));
+  const step = Math.min(MAX_ONBOARDING_STEPS, Math.max(prior?.step ?? 1, userTurns));
 
   const system = buildOnboardingSystemPrompt(step);
   const anthropicMessages: Anthropic.MessageParam[] = messages.map((m) => ({
@@ -91,7 +94,7 @@ export async function POST(req: NextRequest) {
   }
 
   const complete = ctx.onboardingCompleted?.value ?? false;
-  const nextStep = Math.min(7, step + 1);
+  const nextStep = Math.min(MAX_ONBOARDING_STEPS, step + 1);
 
   if (complete) {
     await clearOnboardingState(userId);
@@ -101,7 +104,7 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     reply: replyText.trim(),
-    step: complete ? 7 : nextStep,
+    step: complete ? MAX_ONBOARDING_STEPS : nextStep,
     complete,
     summary: ctx.onboardingCompleted?.summary ?? null,
   });

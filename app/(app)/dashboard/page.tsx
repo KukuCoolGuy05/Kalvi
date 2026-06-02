@@ -4,6 +4,7 @@ import { getCurrentUserId } from "@/lib/auth";
 import { getProfile, getDashboard } from "@/lib/db/queries";
 import { SubjectCard } from "@/components/dashboard/SubjectCard";
 import { ReviewQueue } from "@/components/dashboard/ReviewQueue";
+import { AddCourseButton } from "@/components/dashboard/AddCourseButton";
 import { AccessibilityToolbar } from "@/components/ui/AccessibilityToolbar";
 
 /**
@@ -43,6 +44,7 @@ export default async function DashboardPage() {
             </span>
             <span className="sr-only">learning streak</span>
           </div>
+          <AddCourseButton suggestedSubjects={profile.subjects} />
           <Link
             href="/settings"
             className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium text-fg hover:bg-surface-alt"
@@ -77,19 +79,22 @@ export default async function DashboardPage() {
         </div>
 
         {data.subjects.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border bg-surface/50 p-8 text-center">
+          <div className="flex flex-col items-center rounded-xl border border-dashed border-border bg-surface/50 p-8 text-center">
             <p className="font-medium text-fg">No progress yet — let&apos;s change that.</p>
             <p className="mt-1 text-sm text-muted">
-              Jump into your first session and Kalvi will start tracking what you learn.
+              Pick a course to begin, and Kalvi will start tracking what you learn.
             </p>
-            {firstSubject && (
-              <Link
-                href={`/learn?subject=${encodeURIComponent(firstSubject)}`}
-                className="mt-4 inline-block rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-fg"
-              >
-                Start {firstSubject}
-              </Link>
-            )}
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+              <AddCourseButton suggestedSubjects={profile.subjects} />
+              {firstSubject && (
+                <Link
+                  href={`/learn?subject=${encodeURIComponent(firstSubject)}`}
+                  className="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium text-fg hover:bg-surface-alt"
+                >
+                  Start {firstSubject}
+                </Link>
+              )}
+            </div>
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">

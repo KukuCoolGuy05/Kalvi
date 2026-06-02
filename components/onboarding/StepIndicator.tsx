@@ -5,7 +5,7 @@
  * progress bar plus dot markers. aria attributes announce progress to screen
  * readers; the visual dots are aria-hidden to avoid double announcement.
  */
-export function StepIndicator({ step, total = 7 }: { step: number; total?: number }) {
+export function StepIndicator({ step, total = 4 }: { step: number; total?: number }) {
   const clamped = Math.min(total, Math.max(1, step));
   const pct = Math.round((clamped / total) * 100);
 
