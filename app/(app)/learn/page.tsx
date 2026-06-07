@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getCurrentUserId } from "@/lib/auth";
-import { getProfile, getProgress } from "@/lib/db/queries";
+import { getProfile, getProgress, getLatestSession } from "@/lib/db/queries";
 import { ChatInterface } from "@/components/chat/ChatInterface";
 
 /**
@@ -31,12 +31,29 @@ export default async function LearnPage({
     ? `Welcome back! Last time we worked on ${topic}. Want a quick refresher, or shall we pick up where we left off?`
     : `Hi! Ready to dig into ${topic}? Tell me what you already know, or ask me anything to start.`;
 
+  // Resume the previous conversation for this course, if there is one, so the
+  // transcript persists when the learner leaves and comes back.
+  const previous = await getLatestSession(userId, subject, topic);
+  const initialMessages = previous?.messages?.length ? previous.messages : undefined;
+
+  // Subjects the learner is enrolled in — power the sidebar course list. We
+  // union the active subject in so a freshly-started course always appears.
+  const subjects = Array.from(new Set([...profile.subjects, subject])).filter(Boolean);
+
   return (
+    // `key` remounts the chat when the learner switches to a different course
+    // or resumed session, so state resets cleanly instead of sticking to the
+    // previous one. (Same session → resumes from initialMessages below.)
     <ChatInterface
+      key={`${subject}::${previous?.id ?? topic}`}
       subject={subject}
       topic={topic}
       initialMastery={mastery}
       greeting={greeting}
+      initialMessages={initialMessages}
+      initialSessionId={previous?.id ?? null}
+      subjects={subjects}
+      suggestedSubjects={profile.subjects}
     />
   );
 }

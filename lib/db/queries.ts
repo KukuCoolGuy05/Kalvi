@@ -2,6 +2,7 @@ import { prisma } from "./prisma";
 import { nextReviewAt, blendMastery, isDue } from "@/lib/agent/spacedRepetition";
 import type { LearnerProfileData } from "@/types/learner";
 import type {
+  ChatMessage,
   DashboardData,
   DashboardSubject,
   SessionSummary,
@@ -173,6 +174,44 @@ export async function endSession(
     where: { id: sessionId },
     data: { endedAt: new Date(now), completionRate },
   });
+}
+
+/**
+ * The most recent session for a (subject, topic), used to RESUME a conversation
+ * when the learner returns to a course. Returns the stored transcript so the
+ * chat can rehydrate exactly where they left off.
+ */
+export async function getLatestSession(
+  userId: string,
+  subject: string,
+  topic: string
+): Promise<{ id: string; messages: ChatMessage[] } | null> {
+  const s = await prisma.learningSession.findFirst({
+    where: { userId, subject, topic },
+    orderBy: { startedAt: "desc" },
+  });
+  if (!s) return null;
+  const messages = Array.isArray(s.messages) ? (s.messages as unknown as ChatMessage[]) : [];
+  return { id: s.id, messages };
+}
+
+/**
+ * Remove a course and ERASE all memory tied to it: every progress record and
+ * stored session transcript for that subject, plus the subject on the profile.
+ * This is destructive and intentional — the learner asked to forget it.
+ */
+export async function removeCourse(userId: string, subject: string): Promise<void> {
+  await prisma.$transaction([
+    prisma.progressRecord.deleteMany({ where: { userId, subject } }),
+    prisma.learningSession.deleteMany({ where: { userId, subject } }),
+  ]);
+  const profile = await prisma.learnerProfile.findUnique({ where: { userId } });
+  if (profile) {
+    await prisma.learnerProfile.update({
+      where: { userId },
+      data: { subjects: profile.subjects.filter((s) => s !== subject) },
+    });
+  }
 }
 
 /** Last N session summaries for a subject, for get_session_context. */

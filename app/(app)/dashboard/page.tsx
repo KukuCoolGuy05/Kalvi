@@ -2,14 +2,13 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentUserId } from "@/lib/auth";
 import { getProfile, getDashboard } from "@/lib/db/queries";
-import { SubjectCard } from "@/components/dashboard/SubjectCard";
-import { ReviewQueue } from "@/components/dashboard/ReviewQueue";
+import { SubjectCard, type SubjectCardData } from "@/components/dashboard/SubjectCard";
 import { AddCourseButton } from "@/components/dashboard/AddCourseButton";
 import { AccessibilityToolbar } from "@/components/ui/AccessibilityToolbar";
 
 /**
  * Dashboard — post-onboarding home. Server-rendered with the dashboard query
- * (welcome-back line, streak, subjects in progress, due reviews).
+ * (welcome-back line, streak, enrolled subjects).
  */
 export default async function DashboardPage() {
   const userId = await getCurrentUserId();
@@ -20,6 +19,28 @@ export default async function DashboardPage() {
 
   const data = await getDashboard(userId, Date.now());
   const firstSubject = profile.subjects[0];
+
+  // Build one card per enrolled subject. Subjects the learner added but hasn't
+  // started yet (no progress record) still appear, marked "not started". For
+  // started subjects we surface the highest-mastery topic to continue.
+  const bestBySubject = new Map<string, { topic: string; masteryLevel: number }>();
+  for (const s of data.subjects) {
+    const existing = bestBySubject.get(s.subject);
+    if (!existing || s.masteryLevel > existing.masteryLevel) {
+      bestBySubject.set(s.subject, { topic: s.topic, masteryLevel: s.masteryLevel });
+    }
+  }
+  const allSubjects = Array.from(
+    new Set([...profile.subjects, ...data.subjects.map((s) => s.subject)])
+  );
+  const cards: SubjectCardData[] = allSubjects.map((subject) => {
+    const best = bestBySubject.get(subject);
+    return {
+      subject,
+      topic: best?.topic ?? subject,
+      masteryLevel: best?.masteryLevel ?? null,
+    };
+  });
 
   return (
     <main id="main" className="mx-auto max-w-4xl px-6 py-8">
@@ -54,15 +75,7 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      {/* Due for review */}
-      <section className="mt-8" aria-labelledby="review-heading">
-        <h2 id="review-heading" className="mb-3 text-lg font-semibold text-fg">
-          Due for review
-        </h2>
-        <ReviewQueue reviews={data.dueReviews} />
-      </section>
-
-      {/* Subjects in progress */}
+      {/* Subjects */}
       <section className="mt-8" aria-labelledby="subjects-heading">
         <div className="mb-3 flex items-center justify-between">
           <h2 id="subjects-heading" className="text-lg font-semibold text-fg">
@@ -78,28 +91,20 @@ export default async function DashboardPage() {
           )}
         </div>
 
-        {data.subjects.length === 0 ? (
+        {cards.length === 0 ? (
           <div className="flex flex-col items-center rounded-xl border border-dashed border-border bg-surface/50 p-8 text-center">
-            <p className="font-medium text-fg">No progress yet — let&apos;s change that.</p>
+            <p className="font-medium text-fg">No courses yet — let&apos;s change that.</p>
             <p className="mt-1 text-sm text-muted">
               Pick a course to begin, and Kalvi will start tracking what you learn.
             </p>
             <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
               <AddCourseButton suggestedSubjects={profile.subjects} />
-              {firstSubject && (
-                <Link
-                  href={`/learn?subject=${encodeURIComponent(firstSubject)}`}
-                  className="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium text-fg hover:bg-surface-alt"
-                >
-                  Start {firstSubject}
-                </Link>
-              )}
             </div>
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">
-            {data.subjects.map((s) => (
-              <SubjectCard key={`${s.subject}-${s.topic}`} subject={s} />
+            {cards.map((c) => (
+              <SubjectCard key={c.subject} data={c} />
             ))}
           </div>
         )}

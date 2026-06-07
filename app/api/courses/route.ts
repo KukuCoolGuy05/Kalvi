@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUserId } from "@/lib/auth";
-import { updateProfile } from "@/lib/db/queries";
+import { updateProfile, removeCourse } from "@/lib/db/queries";
 
 export const runtime = "nodejs";
 
@@ -23,5 +23,24 @@ export async function POST(req: NextRequest) {
   }
 
   await updateProfile(userId, { subjects: [subject] });
+  return NextResponse.json({ ok: true });
+}
+
+/**
+ * DELETE /api/courses?subject=...
+ *
+ * Removes the course and erases ALL memory tied to it (progress records and
+ * stored session transcripts), then drops the subject from the profile.
+ */
+export async function DELETE(req: NextRequest) {
+  const userId = await getCurrentUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const subject = req.nextUrl.searchParams.get("subject");
+  if (!subject) {
+    return NextResponse.json({ error: "subject required" }, { status: 400 });
+  }
+
+  await removeCourse(userId, subject);
   return NextResponse.json({ ok: true });
 }

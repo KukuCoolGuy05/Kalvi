@@ -1,5 +1,7 @@
 "use client";
 
+import { memo } from "react";
+import { Markdown } from "./Markdown";
 import type { ChatMessage } from "@/types/session";
 
 /**
@@ -11,8 +13,19 @@ import type { ChatMessage } from "@/types/session";
  * `whitespace-pre-wrap` preserves the bullet lists / ASCII diagrams / numbered
  * steps that the adaptive rules ask the model to produce, which matters a lot
  * for dyslexic and visual learners.
+ *
+ * Memoized: during streaming only the active (last) bubble's props change, so
+ * the rest of a long transcript is skipped on every token — this is the main
+ * reason the chat stays smooth as replies grow.
  */
-export function MessageBubble({ message }: { message: ChatMessage }) {
+export const MessageBubble = memo(function MessageBubble({
+  message,
+  streaming = false,
+}: {
+  message: ChatMessage;
+  /** True for the assistant bubble currently being typed out. */
+  streaming?: boolean;
+}) {
   const isUser = message.role === "user";
 
   return (
@@ -33,8 +46,20 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
             Let&apos;s try this a different way
           </span>
         )}
-        <div className="whitespace-pre-wrap break-words text-[1em]">{message.content}</div>
+        <div className="break-words text-[1em]">
+          {isUser ? (
+            <span className="whitespace-pre-wrap">{message.content}</span>
+          ) : (
+            <Markdown content={message.content} />
+          )}
+          {streaming && (
+            <span
+              aria-hidden
+              className="ml-0.5 inline-block h-[1.05em] w-[2px] translate-y-[2px] animate-pulse rounded-sm bg-current align-middle"
+            />
+          )}
+        </div>
       </div>
     </div>
   );
-}
+});

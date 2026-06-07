@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { MessageBubble } from "./MessageBubble";
 import { QuickReplies } from "./QuickReplies";
 import { StreamingIndicator } from "./StreamingIndicator";
+import { ChatSidebar } from "./ChatSidebar";
 import { MasteryBar } from "@/components/dashboard/MasteryBar";
 import { AccessibilityToolbar } from "@/components/ui/AccessibilityToolbar";
 import type { ChatMessage } from "@/types/session";
@@ -27,37 +28,83 @@ export function ChatInterface({
   topic,
   initialMastery = 0,
   greeting,
+  initialMessages,
+  initialSessionId = null,
+  subjects = [],
+  suggestedSubjects = [],
 }: {
   subject: string;
   topic: string;
   initialMastery?: number;
   greeting?: string;
+  /** A resumed transcript for this course, if one exists. */
+  initialMessages?: ChatMessage[];
+  /** The session id to keep appending to when resuming. */
+  initialSessionId?: string | null;
+  /** The learner's enrolled subjects, for the sidebar course list. */
+  subjects?: string[];
+  /** Onboarding subjects, used to personalize the "Add a course" picker. */
+  suggestedSubjects?: string[];
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>(
-    greeting
-      ? [{ id: "greeting", role: "assistant", content: greeting }]
-      : []
+    initialMessages && initialMessages.length
+      ? initialMessages
+      : greeting
+        ? [{ id: "greeting", role: "assistant", content: greeting }]
+        : []
   );
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [elapsed, setElapsed] = useState(0); // seconds
+  const [sessionId, setSessionId] = useState<string | null>(initialSessionId);
+  const [menuOpen, setMenuOpen] = useState(false); // mobile sidebar drawer
+  const [activeId, setActiveId] = useState<string | null>(null); // bubble being typed
   const scrollRef = useRef<HTMLDivElement>(null);
-  const startRef = useRef<number | null>(null);
 
-  // Gentle, non-pressuring session timer.
-  useEffect(() => {
-    if (startRef.current === null) startRef.current = Date.now();
-    const t = setInterval(() => {
-      if (startRef.current) setElapsed(Math.floor((Date.now() - startRef.current) / 1000));
-    }, 1000);
-    return () => clearInterval(t);
+  // --- Smooth typewriter reveal ------------------------------------------
+  // Network chunks arrive in bursts; we buffer the full received text in
+  // `targetRef` and reveal it character-by-character on an rAF loop so the
+  // reply types out at a steady, pleasant cadence regardless of packet timing.
+  const targetRef = useRef(""); // full text received so far
+  const shownRef = useRef(0); // chars currently rendered
+  const rafRef = useRef<number | null>(null);
+  const doneRef = useRef(false); // network stream closed
+  const pinnedRef = useRef(true); // is the view scrolled to the bottom?
+
+  const revealStep = useCallback((id: string) => {
+    if (rafRef.current !== null) return; // a loop is already running
+    const tick = () => {
+      const target = targetRef.current;
+      if (shownRef.current < target.length) {
+        // Catch up faster the further behind we are, so we never lag badly.
+        const remaining = target.length - shownRef.current;
+        shownRef.current += Math.max(1, Math.ceil(remaining / 6));
+        const slice = target.slice(0, shownRef.current);
+        setMessages((m) =>
+          m.map((msg) => (msg.id === id ? { ...msg, content: slice } : msg))
+        );
+        rafRef.current = requestAnimationFrame(tick);
+      } else {
+        rafRef.current = null;
+        if (doneRef.current) setActiveId(null); // caught up + closed → drop caret
+      }
+    };
+    rafRef.current = requestAnimationFrame(tick);
   }, []);
 
-  // Keep the latest message in view.
+  // Keep the latest message in view — instant (not smooth) so rapid token
+  // updates don't stack animations, and only while the user is at the bottom.
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, streaming]);
+    const el = scrollRef.current;
+    if (el && pinnedRef.current) el.scrollTop = el.scrollHeight;
+  }, [messages]);
+
+  // Stop any in-flight reveal if the component unmounts (e.g. course switch).
+  useEffect(
+    () => () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    },
+    []
+  );
 
   const send = useCallback(
     async (text: string) => {
@@ -74,8 +121,12 @@ export function ChatInterface({
       setInput("");
       setStreaming(true);
 
-      // Placeholder assistant message we'll stream into.
+      // Reset the reveal buffer for this turn.
+      targetRef.current = "";
+      shownRef.current = 0;
+      doneRef.current = false;
       const assistantId = `a-${Date.now()}`;
+      setActiveId(assistantId);
       setMessages((m) => [...m, { id: assistantId, role: "assistant", content: "" }]);
 
       try {
@@ -96,17 +147,22 @@ export function ChatInterface({
         if (!res.body) throw new Error("No response body");
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
-        let acc = "";
         // eslint-disable-next-line no-constant-condition
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          acc += decoder.decode(value, { stream: true });
-          setMessages((m) =>
-            m.map((msg) => (msg.id === assistantId ? { ...msg, content: acc } : msg))
-          );
+          targetRef.current += decoder.decode(value, { stream: true });
+          revealStep(assistantId); // feed the typewriter
         }
+        doneRef.current = true;
+        revealStep(assistantId); // ensure the tail is flushed + caret cleared
       } catch {
+        if (rafRef.current !== null) {
+          cancelAnimationFrame(rafRef.current);
+          rafRef.current = null;
+        }
+        doneRef.current = true;
+        setActiveId(null);
         setMessages((m) =>
           m.map((msg) =>
             msg.id === assistantId
@@ -118,7 +174,7 @@ export function ChatInterface({
         setStreaming(false);
       }
     },
-    [messages, streaming, subject, topic, sessionId]
+    [messages, streaming, subject, topic, sessionId, revealStep]
   );
 
   const onSubmit = (e: React.FormEvent) => {
@@ -126,29 +182,40 @@ export function ChatInterface({
     send(input);
   };
 
-  const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
-  const ss = String(elapsed % 60).padStart(2, "0");
-
   return (
-    <div className="mx-auto flex h-[100dvh] max-w-3xl flex-col">
+    <div className="flex h-[100dvh]">
+      <ChatSidebar
+        subjects={subjects}
+        activeSubject={subject}
+        suggestedSubjects={suggestedSubjects}
+        mobileOpen={menuOpen}
+        onClose={() => setMenuOpen(false)}
+      />
+
+      {/* Chat column — fills the remaining width */}
+      <div className="flex min-w-0 flex-1 flex-col">
       {/* Progress / topic header */}
       <header className="border-b border-border bg-surface/80 px-4 py-3 backdrop-blur">
         <div className="flex items-center justify-between gap-4">
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-fg">{topic || subject}</p>
-            <p className="truncate text-xs text-muted">{subject}</p>
+          <div className="flex min-w-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setMenuOpen(true)}
+              aria-label="Open navigation menu"
+              className="-ml-1 shrink-0 rounded-lg p-1.5 text-fg hover:bg-surface-alt md:hidden"
+            >
+              <MenuIcon />
+            </button>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-fg">{topic || subject}</p>
+              <p className="truncate text-xs text-muted">{subject}</p>
+            </div>
           </div>
           <div className="flex items-center gap-3">
             <div className="w-32">
               <MasteryBar mastery={initialMastery} size="sm" />
             </div>
-            <span
-              className="tabular-nums text-xs text-muted"
-              aria-label={`Time in session: ${mm} minutes ${ss} seconds`}
-              title="Time in this session (no rush!)"
-            >
-              ⏱ {mm}:{ss}
-            </span>
+            <SessionTimer />
           </div>
         </div>
       </header>
@@ -157,26 +224,34 @@ export function ChatInterface({
       <main
         id="main"
         ref={scrollRef}
-        className="flex-1 space-y-4 overflow-y-auto px-4 py-6"
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          pinnedRef.current =
+            el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+        }}
+        className="flex-1 overflow-y-auto px-4 py-6"
         aria-live="polite"
         aria-atomic="false"
       >
-        {messages.length === 0 && (
-          <div className="mt-12 text-center text-muted">
-            <p className="text-lg font-medium text-fg">Ready when you are.</p>
-            <p className="mt-1 text-sm">Ask a question, or just say hi to get started.</p>
-          </div>
-        )}
-        {messages.map((m) => (
-          <MessageBubble key={m.id} message={m} />
-        ))}
-        {streaming && messages[messages.length - 1]?.content === "" && (
-          <StreamingIndicator />
-        )}
+        <div className="mx-auto max-w-3xl space-y-4">
+          {messages.length === 0 && (
+            <div className="mt-12 text-center text-muted">
+              <p className="text-lg font-medium text-fg">Ready when you are.</p>
+              <p className="mt-1 text-sm">Ask a question, or just say hi to get started.</p>
+            </div>
+          )}
+          {messages.map((m) => (
+            <MessageBubble key={m.id} message={m} streaming={m.id === activeId} />
+          ))}
+          {streaming && messages[messages.length - 1]?.content === "" && (
+            <StreamingIndicator />
+          )}
+        </div>
       </main>
 
       {/* Composer + quick replies */}
       <footer className="border-t border-border bg-surface px-4 py-3">
+        <div className="mx-auto max-w-3xl">
         <div className="mb-2">
           <QuickReplies onSend={send} disabled={streaming} />
         </div>
@@ -206,9 +281,51 @@ export function ChatInterface({
             Send
           </button>
         </form>
+        </div>
       </footer>
+      </div>
 
       <AccessibilityToolbar />
     </div>
+  );
+}
+
+function MenuIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M3 6h18M3 12h18M3 18h18" />
+    </svg>
+  );
+}
+
+/**
+ * SessionTimer — isolated so its 1-second tick re-renders only this tiny
+ * component, not the whole transcript (a major source of the old lag).
+ */
+function SessionTimer() {
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    startRef.current = Date.now();
+    const t = setInterval(() => {
+      if (startRef.current) {
+        setElapsed(Math.floor((Date.now() - startRef.current) / 1000));
+      }
+    }, 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
+  const ss = String(elapsed % 60).padStart(2, "0");
+
+  return (
+    <span
+      className="tabular-nums text-xs text-muted"
+      aria-label={`Time in session: ${mm} minutes ${ss} seconds`}
+      title="Time in this session (no rush!)"
+    >
+      ⏱ {mm}:{ss}
+    </span>
   );
 }
