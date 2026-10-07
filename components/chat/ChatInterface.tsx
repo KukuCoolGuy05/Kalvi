@@ -56,6 +56,10 @@ export function ChatInterface({
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId);
+  // Live mastery for this topic — seeded from the server, then updated from the
+  // `x-mastery` header the chat API returns on each turn so the bar moves as you
+  // chat instead of only on reload.
+  const [mastery, setMastery] = useState(initialMastery);
   const [menuOpen, setMenuOpen] = useState(false); // mobile sidebar drawer
   const [activeId, setActiveId] = useState<string | null>(null); // bubble being typed
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -144,6 +148,13 @@ export function ChatInterface({
         const sid = res.headers.get("x-session-id");
         if (sid && !sessionId) setSessionId(sid);
 
+        // Update the mastery bar live from the server's new value for this turn.
+        const mv = res.headers.get("x-mastery");
+        if (mv !== null) {
+          const n = Number(mv);
+          if (!Number.isNaN(n)) setMastery(n);
+        }
+
         if (!res.body) throw new Error("No response body");
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -213,7 +224,7 @@ export function ChatInterface({
           </div>
           <div className="flex items-center gap-3">
             <div className="w-32">
-              <MasteryBar mastery={initialMastery} size="sm" />
+              <MasteryBar mastery={mastery} size="sm" />
             </div>
             <SessionTimer />
           </div>

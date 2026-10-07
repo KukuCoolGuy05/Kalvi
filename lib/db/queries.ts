@@ -136,6 +136,54 @@ export async function recordMastery(
   });
 }
 
+/**
+ * nudgeMastery — a small, per-turn adjustment to the learner's level in a topic,
+ * so the mastery bar visibly moves as they chat (not only when the agent calls
+ * schedule_review at a topic boundary).
+ *
+ *  - "up":   constructive turn → move 12% of the remaining distance toward 1.0
+ *  - "down": the learner signalled confusion → ease down 10%
+ *  - "none": leave the value, but ensure a progress row exists
+ *
+ * Deliberately does NOT touch reviewCount or nextReviewAt — spaced-repetition
+ * scheduling stays owned by recordMastery/schedule_review. The asymptotic step
+ * means mastery rises quickly at first, then slows, and never exceeds 1.0.
+ * Returns the new mastery level (0..1).
+ */
+export async function nudgeMastery(
+  userId: string,
+  subject: string,
+  topic: string,
+  direction: "up" | "down" | "none",
+  now: number
+): Promise<number> {
+  const existing = await prisma.progressRecord.findUnique({
+    where: { userId_subject_topic: { userId, subject, topic } },
+  });
+  const prev = existing?.masteryLevel ?? 0;
+
+  let next = prev;
+  if (direction === "up") next = prev + (1 - prev) * 0.12;
+  else if (direction === "down") next = prev - prev * 0.1;
+  next = Math.max(0, Math.min(1, next));
+
+  const rec = await prisma.progressRecord.upsert({
+    where: { userId_subject_topic: { userId, subject, topic } },
+    update: { masteryLevel: next, lastReviewedAt: new Date(now) },
+    create: {
+      userId,
+      subject,
+      topic,
+      masteryLevel: next,
+      lastReviewedAt: new Date(now),
+      // Seed a first review a day out; schedule_review refines this later.
+      nextReviewAt: new Date(now + 24 * 60 * 60 * 1000),
+      reviewCount: 0,
+    },
+  });
+  return rec.masteryLevel;
+}
+
 // --- Sessions --------------------------------------------------------------
 
 export async function createSession(userId: string, subject: string, topic: string) {
@@ -240,12 +288,18 @@ export async function getRecentSessionSummaries(
 // --- Dashboard -------------------------------------------------------------
 
 export async function getDashboard(userId: string, now: number): Promise<DashboardData> {
-  const [user, progress, lastSession] = await Promise.all([
-    prisma.user.findUnique({ where: { id: userId } }),
+  // One parallel batch — a single round-trip to the DB. Everything else
+  // (last session, started courses, streak) is derived in memory from the one
+  // sessions query, rather than firing extra sequential queries. This is the
+  // main lever on dashboard latency when the DB is in a remote region.
+  const [user, progress, sessions] = await Promise.all([
+    prisma.user.findUnique({ where: { id: userId }, select: { name: true } }),
     prisma.progressRecord.findMany({ where: { userId }, orderBy: { lastReviewedAt: "desc" } }),
-    prisma.learningSession.findFirst({
+    prisma.learningSession.findMany({
       where: { userId },
+      select: { subject: true, topic: true, startedAt: true },
       orderBy: { startedAt: "desc" },
+      take: 365,
     }),
   ]);
 
@@ -259,37 +313,45 @@ export async function getDashboard(userId: string, now: number): Promise<Dashboa
     dueForReview: isDue(p.nextReviewAt, now),
   }));
 
+  const lastSession = sessions[0];
   const lastSessionSummary = lastSession
     ? `Last time you worked on ${lastSession.topic} in ${lastSession.subject}.`
     : null;
 
+  // Latest topic per subject that the learner actually has a session for, so
+  // in-progress courses show "Continue" even before any mastery is recorded.
+  const latestBySubject = new Map<string, string>();
+  for (const s of sessions) {
+    if (!latestBySubject.has(s.subject)) latestBySubject.set(s.subject, s.topic);
+  }
+  const startedSubjects = Array.from(latestBySubject.entries()).map(([subject, topic]) => ({
+    subject,
+    topic,
+  }));
+
   return {
     name: user?.name ?? null,
-    streak: await computeStreak(userId, now),
+    streak: computeStreak(sessions.map((s) => s.startedAt), now),
     lastSessionSummary,
     subjects,
     dueReviews: subjects.filter((s) => s.dueForReview),
+    startedSubjects,
   };
 }
 
 /**
  * Streak = consecutive calendar days (ending today) with >=1 session.
- * Computed from session startedAt timestamps. Days are bucketed in UTC for
- * simplicity; a production version would use the learner's timezone.
+ * Pure: takes the session start times already fetched by getDashboard so it
+ * adds no extra DB round-trip. Days are bucketed in UTC for simplicity; a
+ * production version would use the learner's timezone.
  */
-async function computeStreak(userId: string, now: number): Promise<number> {
-  const sessions = await prisma.learningSession.findMany({
-    where: { userId },
-    select: { startedAt: true },
-    orderBy: { startedAt: "desc" },
-    take: 365,
-  });
-  if (sessions.length === 0) return 0;
+function computeStreak(startTimes: Date[], now: number): number {
+  if (startTimes.length === 0) return 0;
 
   const dayMs = 24 * 60 * 60 * 1000;
   const dayIndex = (t: number) => Math.floor(t / dayMs);
   const today = dayIndex(now);
-  const activeDays = new Set(sessions.map((s) => dayIndex(s.startedAt.getTime())));
+  const activeDays = new Set(startTimes.map((d) => dayIndex(d.getTime())));
 
   // Allow the streak to count from today OR yesterday (so an early-morning
   // dashboard visit before today's session doesn't reset the streak).

@@ -7,11 +7,11 @@ import { runAgent } from "@/lib/agent/runner";
 import { detectConfusion, shouldEscalateConfusion } from "@/lib/agent/confusionDetection";
 import {
   getOrCreateProfile,
-  getProgress,
   createSession,
   appendSessionMessages,
+  nudgeMastery,
 } from "@/lib/db/queries";
-import { getRedis, setSessionStart, getSessionStart } from "@/lib/redis/session";
+import { kv, setSessionStart, getSessionStart } from "@/lib/redis/session";
 import type { ChatMessage } from "@/types/session";
 
 export const runtime = "nodejs";
@@ -59,26 +59,34 @@ export async function POST(req: NextRequest) {
   }
   await setSessionStart(sessionId, now);
 
-  // Current mastery on this topic (for the system prompt).
-  const progress = await getProgress(userId, subject);
-  const topicRecord = progress.find((p) => p.topic === (topic || subject));
-  const masteryLevel = topicRecord?.masteryLevel;
-
   // --- Confusion handling --------------------------------------------------
   const lastUser = [...messages].reverse().find((m) => m.role === "user");
   const confusion = lastUser
     ? detectConfusion(lastUser.content, profile)
     : { isConfused: false, matched: [] as string[], score: 0 };
 
-  const redis = getRedis();
   const confusionCountKey = `session:${sessionId}:confusion`;
   let consecutive = 0;
   if (confusion.isConfused) {
-    consecutive = (await redis.incr(confusionCountKey)) ?? 1;
-    await redis.expire(confusionCountKey, 60 * 60 * 6);
+    consecutive = (await kv.incr(confusionCountKey)) ?? 1;
+    await kv.expire(confusionCountKey, 60 * 60 * 6);
   } else {
-    await redis.del(confusionCountKey);
+    await kv.del(confusionCountKey);
   }
+
+  // --- Live mastery update -------------------------------------------------
+  // Nudge the learner's level in this topic every turn so the mastery bar moves
+  // as they chat: down on confusion, up on a constructive turn. The agent's
+  // schedule_review (at topic boundaries) still refines it. We compute this
+  // before streaming so the new value can ride back on a response header.
+  const resolvedTopic = topic || subject;
+  const hasUserTurn = Boolean(lastUser);
+  const direction: "up" | "down" | "none" = !hasUserTurn
+    ? "none"
+    : confusion.isConfused
+      ? "down"
+      : "up";
+  const newMastery = await nudgeMastery(userId, subject, resolvedTopic, direction, now);
 
   // Build the message list. If confusion has escalated (3+ in a row on the same
   // concept), inject a system-style nudge as a leading user note so the model
@@ -115,9 +123,9 @@ export async function POST(req: NextRequest) {
   const system = buildLearningSystemPrompt({
     name: profile && (await profileName(userId)) || "there",
     subject,
-    topic: topic || subject,
+    topic: resolvedTopic,
     profile,
-    masteryLevel,
+    masteryLevel: newMastery,
   });
 
   // --- Stream the agent ----------------------------------------------------
@@ -174,6 +182,8 @@ export async function POST(req: NextRequest) {
       "Content-Type": "text/plain; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       "x-session-id": sessionId,
+      // Updated level in this topic (0..1), so the client can move the bar live.
+      "x-mastery": newMastery.toFixed(4),
     },
   });
 }

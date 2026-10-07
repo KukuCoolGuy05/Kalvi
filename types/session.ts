@@ -36,6 +36,13 @@ export interface DashboardData {
   lastSessionSummary: string | null;
   subjects: DashboardSubject[];
   dueReviews: DashboardSubject[];
+  /**
+   * Courses the learner has an actual session for (started), with the most
+   * recent topic worked on — even if no mastery/progress has been recorded yet.
+   * Lets the dashboard show "Continue" instead of "Not started" for courses in
+   * progress.
+   */
+  startedSubjects: { subject: string; topic: string }[];
 }
 
 /** Summary persisted at session end and used by get_session_context. */

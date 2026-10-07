@@ -181,7 +181,7 @@ export default function SettingsPage() {
               </p>
             </fieldset>
 
-            <Field label="Subjects (comma separated)">
+            <Field label="Courses (comma separated)">
               <input
                 value={profile.subjects.join(", ")}
                 onChange={(e) =>

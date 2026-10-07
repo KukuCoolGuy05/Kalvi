@@ -14,15 +14,21 @@ export default async function DashboardPage() {
   const userId = await getCurrentUserId();
   if (!userId) redirect("/login");
 
-  const profile = await getProfile(userId);
+  // Fetch profile + dashboard in parallel (they don't depend on each other) to
+  // save a round-trip to the remote DB.
+  const [profile, data] = await Promise.all([
+    getProfile(userId),
+    getDashboard(userId, Date.now()),
+  ]);
   if (!profile?.onboardingComplete) redirect("/onboarding");
 
-  const data = await getDashboard(userId, Date.now());
   const firstSubject = profile.subjects[0];
 
-  // Build one card per enrolled subject. Subjects the learner added but hasn't
-  // started yet (no progress record) still appear, marked "not started". For
-  // started subjects we surface the highest-mastery topic to continue.
+  // Build one card per enrolled course.
+  //  - Courses with recorded mastery show their highest-mastery topic.
+  //  - Courses the learner has started a session on (but no mastery yet) show
+  //    "Continue" at 0% rather than "Not started".
+  //  - Courses added but never opened show "Not started".
   const bestBySubject = new Map<string, { topic: string; masteryLevel: number }>();
   for (const s of data.subjects) {
     const existing = bestBySubject.get(s.subject);
@@ -30,15 +36,27 @@ export default async function DashboardPage() {
       bestBySubject.set(s.subject, { topic: s.topic, masteryLevel: s.masteryLevel });
     }
   }
+  const startedTopicBySubject = new Map(
+    data.startedSubjects.map((s) => [s.subject, s.topic])
+  );
   const allSubjects = Array.from(
-    new Set([...profile.subjects, ...data.subjects.map((s) => s.subject)])
+    new Set([
+      ...profile.subjects,
+      ...data.subjects.map((s) => s.subject),
+      ...data.startedSubjects.map((s) => s.subject),
+    ])
   );
   const cards: SubjectCardData[] = allSubjects.map((subject) => {
     const best = bestBySubject.get(subject);
+    const startedTopic = startedTopicBySubject.get(subject);
+    // Mastery: real value if recorded, else 0 if started (a session exists),
+    // else null (never opened → "Not started").
+    const masteryLevel =
+      best?.masteryLevel ?? (startedTopic !== undefined ? 0 : null);
     return {
       subject,
-      topic: best?.topic ?? subject,
-      masteryLevel: best?.masteryLevel ?? null,
+      topic: best?.topic ?? startedTopic ?? subject,
+      masteryLevel,
     };
   });
 
@@ -76,10 +94,10 @@ export default async function DashboardPage() {
       </div>
 
       {/* Subjects */}
-      <section className="mt-8" aria-labelledby="subjects-heading">
+      <section className="mt-8" aria-labelledby="courses-heading">
         <div className="mb-3 flex items-center justify-between">
-          <h2 id="subjects-heading" className="text-lg font-semibold text-fg">
-            Your subjects
+          <h2 id="courses-heading" className="text-lg font-semibold text-fg">
+            Your courses
           </h2>
           {firstSubject && (
             <Link
